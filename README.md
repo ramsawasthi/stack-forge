@@ -1,4 +1,32 @@
+# 🔥 Stack Forge
 
+> A multi-stack developer toolkit with production-ready templates, curated prompts, and Cursor rules to help you **build faster, smarter, and consistently**.
+
+---
+
+## 🚀 What is Stack Forge?
+
+**Stack Forge** is a curated collection of:
+
+- ⚡ Full-stack templates (MERN, Spring Boot, and more)
+- 🤖 AI prompts for rapid development
+- 🧠 Cursor rules for consistent coding standards
+- 🧩 Sample projects to learn and extend
+
+Whether you're starting a new project or experimenting with a new stack, Stack Forge gives you a **ready-to-build foundation**.
+
+---
+
+## 📦 What's Inside
+```
+stack-forge/
+├── prompts/ # AI prompts for different stacks
+├── cursor-rules/ # Cursor editor configurations
+├── templates/ # Starter templates (boilerplates)
+├── sample-projects/ # Complete example projects
+├── docs/ # Documentation & presentations
+└── assets/ # Images, banners, etc.
+```
 ---
 
 ## 🧱 Supported Stacks
