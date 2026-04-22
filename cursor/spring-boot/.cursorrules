@@ -1,0 +1,219 @@
+# ============================================================
+#  .cursorrules — Spring Boot Project
+#  Quarks Technosoft Engineering Standards
+#  Stack: Java 21 · Spring Boot 3.x · PostgreSQL · Redis · Docker
+# ============================================================
+
+## Project Identity
+Stack: Java 21 LTS, Spring Boot 3.3, Spring Data JPA, Spring Security 6, PostgreSQL 16, Redis 7
+Build tool: Maven (pom.xml) — use Spring Initializr dependencies structure
+Architecture: Layered (Controller → Service → Repository) with Domain-Driven Design concepts
+
+---
+
+## PROJECT STRUCTURE
+
+src/main/java/com/quarks/opportunitymapper/
+  api/
+    controller/      # REST controllers — HTTP layer only
+    dto/             # Request/Response DTOs (records preferred)
+    mapper/          # MapStruct mappers (DTO ↔ Entity)
+    exception/       # @ControllerAdvice global exception handler
+  domain/
+    model/           # JPA entities
+    repository/      # Spring Data JPA repositories (interfaces)
+    service/         # Business logic interfaces + implementations
+    event/           # Domain events (ApplicationEvent)
+  infrastructure/
+    config/          # Spring @Configuration classes
+    cache/           # Redis cache config and helpers
+    external/        # External API clients (Claude, scraper)
+    persistence/     # Custom query implementations, specs
+  core/
+    exception/       # Custom exception hierarchy
+    util/            # Pure utility functions (no Spring beans)
+
+src/main/resources/
+  application.yml          # Base config (no secrets here)
+  application-dev.yml      # Dev overrides
+  application-prod.yml     # Prod overrides
+  db/migration/            # Flyway migration scripts
+
+src/test/java/
+  unit/              # Unit tests — no Spring context (@ExtendWith(MockitoExtension))
+  integration/       # @SpringBootTest slice tests
+  e2e/               # Full stack tests with TestContainers
+
+---
+
+## JAVA 21 STANDARDS
+
+### Language features — use modern Java
+- Records for DTOs: public record ResearchRequest(String companyName, boolean forceRefresh) {}
+- Sealed classes for domain variants: sealed interface ResearchStatus permits Pending, Completed, Failed {}
+- Pattern matching for instanceof: if (error instanceof RateLimitError rle) { ... }
+- Switch expressions (not statements) for multi-branch logic
+- Text blocks for multi-line strings (SQL, JSON templates)
+- Virtual threads: server.tomcat.threads.virtual=true in application.yml for high concurrency
+
+### Type safety
+- Never use raw types — always parameterize generics: List<Company> not List
+- Optional<T> for nullable returns from repositories — never return null from a service method
+- @NonNull / @Nullable annotations on all public method parameters and return types
+- No unchecked casts — use instanceof with pattern matching instead
+
+### Code standards
+- All public methods documented with Javadoc (at minimum: @param, @return, @throws)
+- Max method length: 20 lines. Extract private helpers if longer.
+- Max class length: 200 lines. Split into smaller focused classes if longer.
+- Constructor injection only — never @Autowired field injection
+- final fields in all @Service and @Component classes
+
+---
+
+## SPRING BOOT ARCHITECTURE
+
+### Controller layer (strict rules)
+- Annotate with @RestController @RequestMapping("/api/v1/resource")
+- Methods return ResponseEntity<ApiResponse<T>> — never return domain entities
+- Validate input with @Valid on @RequestBody — use Bean Validation annotations on DTO records
+- No business logic — only: deserialize → validate → call service → serialize
+- HTTP methods map to operations: POST=create, GET=read, PUT=full update, PATCH=partial, DELETE=remove
+- Use @ResponseStatus(HttpStatus.CREATED) for creation endpoints
+
+### Service layer
+- Always define an interface: ResearchService with implementation ResearchServiceImpl
+- Annotate impl with @Service @Transactional (class level for read-only: @Transactional(readOnly=true))
+- Override to @Transactional (readOnly=false) on write methods
+- No HTTP types (HttpServletRequest etc.) — accept and return domain objects or DTOs
+- Throw typed exceptions — never throw RuntimeException directly
+
+### Repository layer
+- Extend JpaRepository<Entity, UUID> — get CRUD and pagination for free
+- Custom queries: prefer Spring Data method names for simple queries
+- Complex queries: @Query with JPQL (not native SQL unless absolutely necessary)
+- Projections: use interface projections to select subset of fields
+- Never load full entity graph when only a few fields needed (causes N+1 problems)
+- Use @EntityGraph for intentional eager loading — never FetchType.EAGER on associations
+
+### Entity design
+- UUID primary keys: @Id @GeneratedValue(strategy = GenerationType.UUID)
+- Audit fields via @EntityListeners(AuditingEntityListener.class):
+  @CreatedDate LocalDateTime createdAt
+  @LastModifiedDate LocalDateTime updatedAt
+- Soft delete: LocalDateTime deletedAt (null = active). Use @Where(clause="deleted_at IS NULL") on entity
+- Use @Column(nullable=false) explicitly — do not rely on DB defaults
+- Bidirectional relationships: always manage both sides. Use helper methods on the owning side.
+- No @ManyToMany with join table — use explicit join entity with its own ID
+
+---
+
+## API DESIGN
+
+### Consistent response envelope
+```java
+// ApiResponse.java — ALL endpoints return this
+public record ApiResponse<T>(
+    boolean success,
+    T data,
+    String errorCode,
+    String message,
+    PageMeta meta  // null for non-paginated
+) {}
+```
+
+### Error handling
+```java
+// GlobalExceptionHandler.java
+@ControllerAdvice
+public class GlobalExceptionHandler {
+    @ExceptionHandler(AppException.class) // All custom exceptions
+    @ExceptionHandler(MethodArgumentNotValidException.class) // Validation
+    @ExceptionHandler(Exception.class) // Fallback — log + 500
+}
+```
+
+### Pagination
+- All list endpoints accept: page (0-based), size (default 20, max 100), sort
+- Return: Page<T> wrapped in ApiResponse with PageMeta { page, size, total, totalPages }
+- Use Pageable from Spring — never manual offset/limit
+
+---
+
+## EXCEPTION HIERARCHY
+
+```
+AppException (RuntimeException)
+  ├── EntityNotFoundException (404) — "Company 'X' not found"
+  ├── ValidationException (422) — input failed business rules
+  ├── ConflictException (409) — duplicate resource
+  ├── ExternalServiceException (503) — Claude API, scraper failures
+  │   └── RateLimitException (429) — with retryAfter field
+  └── ForbiddenException (403) — auth passed but access denied
+```
+
+- Always include: errorCode (machine-readable), message (human-readable), requestId
+- Log at WARN for 4xx, ERROR for 5xx. Always include MDC context (userId, requestId)
+
+---
+
+## SECURITY
+
+- Spring Security 6 with SecurityFilterChain bean (no WebSecurityConfigurerAdapter)
+- JWT stateless auth: validate in JwtAuthenticationFilter, set SecurityContext
+- Never store JWT in localStorage (frontend) — use HttpOnly cookie
+- Method security: @PreAuthorize("hasRole('ROLE_ADMIN')") on sensitive endpoints
+- CORS configured in SecurityFilterChain — not in @CrossOrigin annotations
+- Sensitive config via Spring Cloud Config or environment variables — never in application.yml committed to git
+
+---
+
+## TESTING
+
+### Unit tests (no Spring context)
+- @ExtendWith(MockitoExtension.class) — fastest, no context load
+- Mock dependencies with @Mock + @InjectMocks
+- Test service logic in isolation — mock repositories, external clients
+- Naming: methodName_WhenCondition_ShouldExpectedOutcome
+
+### Integration tests (Spring slices)
+- @DataJpaTest for repository tests — spins up only JPA context
+- @WebMvcTest for controller tests — spins up only web layer
+- @SpringBootTest(webEnvironment=RANDOM_PORT) for full stack tests
+- TestContainers for real PostgreSQL in integration tests (not H2)
+- @Sql annotations for test data setup/teardown
+
+### Coverage targets
+- Service layer: 90% line coverage
+- Repository layer: 80% (custom queries especially)
+- Controller layer: 100% of endpoints tested via MockMvc
+
+---
+
+## PERFORMANCE
+
+- Caching: @Cacheable on service methods for read-heavy data
+  Spring Cache with Redis: cache research results, company profiles
+  TTL: configure per cache region in CacheConfig
+- Async processing: @Async for fire-and-forget operations (email, notifications)
+  Configure ThreadPoolTaskExecutor with named pool
+- Lazy loading: FetchType.LAZY on all associations by default
+  Use @EntityGraph or JOIN FETCH only when you know you need related data
+- Query optimization: use EXPLAIN ANALYZE in tests — fail test if query plan uses Seq Scan on large tables
+
+---
+
+## DOCKER
+- Multi-stage Dockerfile: maven:3.9-eclipse-temurin-21 build + eclipse-temurin:21-jre-alpine runtime
+- docker-compose.yml: app, postgres:16, redis:7, pgadmin (dev profile only)
+- Health check: GET /actuator/health (Spring Boot Actuator)
+- JVM tuning in Dockerfile: -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0
+
+---
+
+## FILE RULES
+- Package declaration matches directory structure exactly
+- No business logic in @Configuration classes
+- No @Autowired field injection — constructor injection only
+- All constants in dedicated Constants class or enum — no magic strings/numbers
+- Line 1 comment: // com/quarks/opportunitymapper/[path]/ClassName.java
