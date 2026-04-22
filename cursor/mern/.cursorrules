@@ -1,0 +1,155 @@
+# ============================================================
+#  .cursorrules — MERN Stack Project
+#  Quarks Technosoft Engineering Standards
+#  Stack: MongoDB · Express · React 19 · Node.js 20 · TypeScript
+# ============================================================
+
+## Project Identity
+Stack: MERN (MongoDB, Express.js, Node.js 20 LTS, React 19, TypeScript 5)
+Package manager: pnpm workspaces (monorepo)
+Structure: /apps/api (Express backend), /apps/web (React frontend), /packages/shared (types + utils)
+
+---
+
+## MONOREPO STRUCTURE
+
+apps/
+  api/           # Express + Node.js backend
+    src/
+      routes/    # Express routers — parse req/res only
+      services/  # Business logic — no req/res types
+      models/    # Mongoose schemas + TypeScript interfaces
+      middleware/ # Auth, error handler, request logger
+      repositories/ # All DB queries (Mongoose)
+      core/      # Config, logger, exceptions, db connection
+    tests/
+      unit/
+      integration/
+  web/           # React frontend
+    src/
+      components/  # Reusable presentational components
+      features/    # Feature folders (each has container + view + hook)
+      hooks/       # Shared custom hooks
+      lib/         # API client, utils, type guards
+      stores/      # Zustand stores
+      types/       # TypeScript interfaces (mirrors backend DTOs)
+packages/
+  shared/        # Types shared between api and web (DTOs)
+
+---
+
+## BACKEND — Node.js + Express + MongoDB
+
+### Architecture layers (strict — never cross)
+- Route handler → calls service only. No Mongoose queries. No business logic.
+- Service → orchestrates logic. No req/res objects. No Mongoose queries directly.
+- Repository → all Mongoose queries. Returns plain objects (lean()). Never returns Mongoose documents to service.
+- Model → Mongoose schema + zod validation schema. No logic.
+
+### Node.js / TypeScript standards
+- TypeScript strict mode: true in tsconfig (no implicit any, no implicit returns)
+- All async functions return Promise<T> with explicit return type annotation
+- No callbacks — async/await only
+- Use express-async-errors so async errors propagate to error middleware
+- Never use require() — ESM imports only (type: module in package.json)
+- All environment variables typed via zod schema in src/core/config.ts — fail fast on startup if missing
+
+### MongoDB / Mongoose standards
+- Always call .lean() on read queries — returns plain JS objects, not Mongoose documents
+- Use select() to project only needed fields — never return password or sensitive fields
+- Use session for multi-document writes (atomic transactions)
+- Index every field used in .find() queries — declare indexes in schema
+- Use timestamps: true on all schemas (createdAt, updatedAt auto-managed)
+- Soft deletes: deletedAt: Date field on every schema. All queries filter { deletedAt: null }
+- ObjectId → string conversion: use .toString() on _id in repository layer before returning to service
+
+### Express standards
+- All routes versioned: /api/v1/...
+- Input validation with zod on every route — validate req.body, req.params, req.query
+- Never trust req.body directly — always parse through zod schema first
+- Consistent error response shape: { success: false, errorCode: string, message: string, errors?: [] }
+- Consistent success shape: { success: true, data: T, meta?: { page, total } }
+- Rate limiting on all public routes (express-rate-limit)
+- Helmet middleware on app startup
+- CORS configured via environment variable — not hardcoded
+
+### Error handling
+- Custom error class: AppError extends Error { statusCode, errorCode, isOperational }
+- Central error middleware in src/middleware/errorHandler.ts catches all errors
+- Operational errors (AppError): return to client. Programming errors: crash and let PM2/Docker restart.
+- Always log error with context (userId, requestId, path) before responding
+- winston logger with JSON format in production, pretty in development
+
+---
+
+## FRONTEND — React 19 + TypeScript
+
+### Component rules
+- Container/Presentation split: containers fetch data, presentations render it
+- Max 150 lines per component — split if larger
+- Shared types in /packages/shared or /src/types — never redefine API types in components
+- All API calls through /src/lib/api.ts — never fetch() directly in a component
+- All 4 async states handled: loading (skeleton) · error (ErrorMessage) · empty (EmptyState) · success
+
+### State management
+- Server state: TanStack Query (useQuery, useMutation) — never put API responses in useState
+- Client/UI state: Zustand store
+- Form state: React Hook Form + Zod resolver
+- URL state: search params for filters and pagination (shareable URLs)
+
+### TypeScript (frontend)
+- No any. No non-null assertions (!). satisfies over as.
+- Zod parse API responses before use — catches schema drift at runtime
+- Discriminated unions for async state: { status: 'idle' | 'loading' | 'error' | 'success' }
+- Props always typed with explicit interface
+
+### Styling
+- Tailwind CSS v4 utility classes only — no inline style={{ }}
+- shadcn/ui for base components (Button, Card, Input, Dialog, Table)
+- Quarks brand: primary #0D1B3E (navy), accent #00C4CC (teal)
+- Responsive: mobile-first, breakpoints sm: md: lg:
+- Accessible: aria-label on icon-only buttons, role on interactive non-button elements
+
+---
+
+## TESTING
+
+### Backend
+- jest + supertest for API integration tests
+- mongodb-memory-server for in-memory MongoDB (no real DB in unit tests)
+- Mock external HTTP calls with msw (mock service worker)
+- Every service function: 1 happy path + 1 error path minimum
+- Repository tests: test against real MongoDB schemas using in-memory server
+
+### Frontend
+- vitest + @testing-library/react
+- Mock API calls with msw — no real HTTP in component tests
+- Test user behaviour, not implementation: queryByRole, queryByText over queryByTestId
+- Every async component: test loading state, error state, success state
+
+---
+
+## DOCKER
+- docker-compose.yml: services for api, web (dev only), mongodb, redis
+- MongoDB: mongo:7 with named volume for data persistence
+- Health checks on all services
+- .env.example with all required variables and comments
+- Never hardcode ports or credentials — all from environment
+
+---
+
+## GIT
+- Commit format: type(scope): message
+  Types: feat fix refactor test docs chore
+  Example: feat(api/research): add company search endpoint
+- One logical change per commit
+- Branch: feat/ fix/ refactor/ hotfix/
+- Never commit .env, node_modules, dist/
+
+---
+
+## FILE RULES
+- Line 1 of every file: // apps/api/src/[path].ts or // apps/web/src/[path].tsx
+- No placeholders (TODO, "implement this", "add logic here")
+- No console.log — use winston logger (backend) or structured error boundary (frontend)
+- Export style: named exports for utilities/hooks/components. Default export only for page-level components.
